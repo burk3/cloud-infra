@@ -17,7 +17,10 @@ resource "aws_iam_role" "dns_node" {
 }
 
 data "aws_iam_policy_document" "ssm_dns_nodes" {
-  # Read auth keys + per-host saved tailscaled state.
+  # Read the auth key (first ever boot) and the per-host state seed
+  # (consumed once when an EBS volume is initially empty). Persistent
+  # tailscaled state lives on the EBS-attached state volume from then on,
+  # so the boxes no longer need ssm:PutParameter.
   statement {
     effect  = "Allow"
     actions = [
@@ -25,22 +28,7 @@ data "aws_iam_policy_document" "ssm_dns_nodes" {
       "ssm:GetParameters",
     ]
     resources = [
-      # Wildcard region/account — both regions share the same parameter
-      # names. Covers /dns-nodes/tailscale-authkey and
-      # /dns-nodes/<host>/tailscaled-state.
       "arn:aws:ssm:*:*:parameter/dns-nodes/*",
-    ]
-  }
-  # Write only the per-host tailscaled.state path. The instance's own
-  # bootstrap script saves its current state here after every join so a
-  # future instance with the same hostname can restore the same node
-  # identity (and IP). Restricted to the /tailscaled-state suffix so a
-  # compromised box can't trash the shared auth key.
-  statement {
-    effect  = "Allow"
-    actions = ["ssm:PutParameter"]
-    resources = [
-      "arn:aws:ssm:*:*:parameter/dns-nodes/*/tailscaled-state",
     ]
   }
 }
