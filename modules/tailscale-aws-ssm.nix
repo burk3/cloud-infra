@@ -122,10 +122,29 @@ in
       ];
       script = ''
         set -euo pipefail
-        if tailscale status --json 2>/dev/null | jq -e '.BackendState == "Running"' >/dev/null; then
-          echo "tailscale already Running; nothing to do"
-          exit 0
-        fi
+        # tailscaled.service is Type=notify and may report ready before it
+        # has finished consuming a restored state file. If we check
+        # BackendState too early we see Starting/NoState, decide the box
+        # needs to authkey-join, and end up running `tailscale up` on a
+        # node that was about to come up clean from its restored state.
+        # Wait a few seconds for the daemon to make up its mind.
+        for i in 1 2 3 4 5 6 7 8 9 10; do
+          STATE=$(tailscale status --json 2>/dev/null | jq -r '.BackendState // "Unknown"')
+          case "$STATE" in
+            Running)
+              echo "tailscale already Running (attempt $i); nothing to do"
+              exit 0
+              ;;
+            NoState|NeedsLogin)
+              echo "tailscale BackendState=$STATE; authkey-join needed"
+              break
+              ;;
+            *)
+              echo "tailscale BackendState=$STATE; waiting..."
+              sleep 2
+              ;;
+          esac
+        done
         AUTH_KEY=$(aws ssm get-parameter \
           --name ${cfg.authKeyParam} \
           --with-decryption \
