@@ -38,6 +38,18 @@ in
       description = "Public half of the signing keypair used to verify closures from `cacheUrl`.";
     };
 
+    statePathPrefix = lib.mkOption {
+      type = lib.types.str;
+      default = "/dns-nodes";
+      description = ''
+        SSM Parameter Store path prefix for per-host persistent state. Each
+        host stores its tailscaled.state (base64-encoded SecureString) at
+        `<statePathPrefix>/<hostname>/tailscaled-state`. The restore service
+        pulls this at boot so a recreated instance with the same hostname
+        keeps the same tailnet node identity (and therefore the same IP).
+      '';
+    };
+
   };
 
   config = {
@@ -80,6 +92,56 @@ in
       allowedTCPPorts = [ 53 ];
     };
 
+    # Restore tailscaled.state from SSM before tailscaled starts. On a fresh
+    # instance (empty /var/lib/tailscale), this transplants the node identity
+    # of the previous host with this hostname, so the box rejoins with the
+    # same tailnet IP. On an already-bootstrapped box, this is a no-op
+    # (existing state file wins).
+    systemd.services.tailscale-state-restore = {
+      description = "Restore tailscaled.state from SSM (preserve tailnet identity across recreates)";
+      wantedBy = [ "tailscaled.service" ];
+      before = [ "tailscaled.service" ];
+      after = [ "network-online.target" ];
+      wants = [ "network-online.target" ];
+      serviceConfig = {
+        Type = "oneshot";
+        RemainAfterExit = true;
+      };
+      environment.AWS_USE_DUALSTACK_ENDPOINT = "true";
+      path = [
+        pkgs.awscli2
+        pkgs.coreutils
+      ];
+      script = ''
+        set -uo pipefail
+        STATE_FILE=/var/lib/tailscale/tailscaled.state
+        if [ -s "$STATE_FILE" ]; then
+          echo "local tailscaled state already present; not restoring"
+          exit 0
+        fi
+        PARAM="${cfg.statePathPrefix}/${config.networking.hostName}/tailscaled-state"
+        OUT=$(aws ssm get-parameter \
+                --name "$PARAM" \
+                --with-decryption \
+                --query 'Parameter.Value' \
+                --output text 2>&1)
+        rc=$?
+        if [ "$rc" -ne 0 ]; then
+          if echo "$OUT" | grep -q ParameterNotFound; then
+            echo "no saved state at $PARAM; tailscale-bootstrap will mint a fresh identity"
+            exit 0
+          fi
+          echo "ERROR fetching $PARAM: $OUT" >&2
+          exit 1
+        fi
+        mkdir -p /var/lib/tailscale
+        printf '%s' "$OUT" | base64 -d > "$STATE_FILE"
+        chmod 600 "$STATE_FILE"
+        chown root:root "$STATE_FILE"
+        echo "restored tailscaled state from $PARAM ($(wc -c < "$STATE_FILE") bytes)"
+      '';
+    };
+
     systemd.services.tailscale-bootstrap = {
       description = "Join tailnet using auth key from SSM Parameter Store";
       wantedBy = [ "multi-user.target" ];
@@ -104,26 +166,37 @@ in
       path = [
         pkgs.awscli2
         pkgs.tailscale
+        pkgs.coreutils
       ];
       script = ''
         set -euo pipefail
         if tailscale status --json 2>/dev/null | ${pkgs.jq}/bin/jq -e '.BackendState == "Running"' >/dev/null; then
-          echo "tailscale already running; nothing to do"
-          exit 0
+          echo "tailscale already running; not re-authing"
+        else
+          AUTH_KEY=$(aws ssm get-parameter \
+            --name ${cfg.tailscaleAuthKeyParam} \
+            --with-decryption \
+            --query 'Parameter.Value' --output text)
+          if [ -z "$AUTH_KEY" ] || [ "$AUTH_KEY" = "None" ]; then
+            echo "ERROR: SSM parameter returned empty or null auth key" >&2
+            exit 1
+          fi
+          tailscale up \
+            --authkey "$AUTH_KEY" \
+            --hostname "${config.networking.hostName}" \
+            --advertise-tags=tag:dns-node \
+            --ssh
         fi
-        AUTH_KEY=$(aws ssm get-parameter \
-          --name ${cfg.tailscaleAuthKeyParam} \
-          --with-decryption \
-          --query 'Parameter.Value' --output text)
-        if [ -z "$AUTH_KEY" ] || [ "$AUTH_KEY" = "None" ]; then
-          echo "ERROR: SSM parameter returned empty or null auth key" >&2
-          exit 1
+        STATE_FILE=/var/lib/tailscale/tailscaled.state
+        if [ -s "$STATE_FILE" ]; then
+          STATE_B64=$(base64 -w0 "$STATE_FILE")
+          aws ssm put-parameter \
+            --name "${cfg.statePathPrefix}/${config.networking.hostName}/tailscaled-state" \
+            --type SecureString \
+            --value "$STATE_B64" \
+            --overwrite >/dev/null
+          echo "saved tailscaled state to SSM"
         fi
-        tailscale up \
-          --authkey "$AUTH_KEY" \
-          --hostname "${config.networking.hostName}" \
-          --advertise-tags=tag:dns-node \
-          --ssh
       '';
     };
 

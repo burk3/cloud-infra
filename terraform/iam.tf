@@ -16,7 +16,8 @@ resource "aws_iam_role" "dns_node" {
   assume_role_policy = data.aws_iam_policy_document.ec2_trust.json
 }
 
-data "aws_iam_policy_document" "ssm_read_dns_nodes" {
+data "aws_iam_policy_document" "ssm_dns_nodes" {
+  # Read auth keys + per-host saved tailscaled state.
   statement {
     effect  = "Allow"
     actions = [
@@ -25,16 +26,29 @@ data "aws_iam_policy_document" "ssm_read_dns_nodes" {
     ]
     resources = [
       # Wildcard region/account — both regions share the same parameter
-      # names. Covers /dns-nodes/tailscale-authkey.
+      # names. Covers /dns-nodes/tailscale-authkey and
+      # /dns-nodes/<host>/tailscaled-state.
       "arn:aws:ssm:*:*:parameter/dns-nodes/*",
+    ]
+  }
+  # Write only the per-host tailscaled.state path. The instance's own
+  # bootstrap script saves its current state here after every join so a
+  # future instance with the same hostname can restore the same node
+  # identity (and IP). Restricted to the /tailscaled-state suffix so a
+  # compromised box can't trash the shared auth key.
+  statement {
+    effect  = "Allow"
+    actions = ["ssm:PutParameter"]
+    resources = [
+      "arn:aws:ssm:*:*:parameter/dns-nodes/*/tailscaled-state",
     ]
   }
 }
 
 resource "aws_iam_role_policy" "dns_node_ssm" {
-  name   = "ssm-read-dns-nodes"
+  name   = "ssm-dns-nodes"
   role   = aws_iam_role.dns_node.id
-  policy = data.aws_iam_policy_document.ssm_read_dns_nodes.json
+  policy = data.aws_iam_policy_document.ssm_dns_nodes.json
 }
 
 data "aws_iam_policy_document" "cache_read" {
