@@ -1,15 +1,5 @@
-# hydra.ts.t11s.net -> juicy-j's tailnet IPs, sourced live from the tailscale
-# provider so a tailnet IP rotation on that device propagates with `terraform
-# apply` instead of needing a `variables.tf` edit.
-
-data "tailscale_device" "juicy_j" {
-  name = "juicy-j.${var.tailnet}"
-}
-
-locals {
-  juicy_j_tailnet_v4 = [for a in data.tailscale_device.juicy_j.addresses : a if !strcontains(a, ":")]
-  juicy_j_tailnet_v6 = [for a in data.tailscale_device.juicy_j.addresses : a if strcontains(a, ":")]
-}
+# hydra.ts.t11s.net -> juicy-j's tailnet IPs (via data.tailscale_device.juicy_j
+# in tailscale.tf).
 
 resource "aws_route53_record" "hydra_a" {
   provider = aws.usw2

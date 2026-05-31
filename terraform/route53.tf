@@ -26,7 +26,7 @@ resource "aws_route53_record" "turing_a" {
   name     = "turing.${var.ts_dns_zone}"
   type     = "A"
   ttl      = 60
-  records  = [var.turing_addr_v4]
+  records  = local.turing_tailnet_v4
 }
 
 resource "aws_route53_record" "turing_aaaa" {
@@ -35,7 +35,7 @@ resource "aws_route53_record" "turing_aaaa" {
   name     = "turing.${var.ts_dns_zone}"
   type     = "AAAA"
   ttl      = 60
-  records  = [var.turing_addr_v6]
+  records  = local.turing_tailnet_v6
 }
 
 # juicy-j
@@ -45,7 +45,7 @@ resource "aws_route53_record" "juicy_j_a" {
   name     = "juicy-j.${var.ts_dns_zone}"
   type     = "A"
   ttl      = 60
-  records  = [var.juicy_j_addr_v4]
+  records  = local.juicy_j_tailnet_v4
 }
 
 resource "aws_route53_record" "juicy_j_aaaa" {
@@ -54,5 +54,5 @@ resource "aws_route53_record" "juicy_j_aaaa" {
   name     = "juicy-j.${var.ts_dns_zone}"
   type     = "AAAA"
   ttl      = 60
-  records  = [var.juicy_j_addr_v6]
+  records  = local.juicy_j_tailnet_v6
 }

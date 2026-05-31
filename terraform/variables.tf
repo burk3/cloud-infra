@@ -22,26 +22,6 @@ variable "ts_dns_zone" {
   default     = "ts.t11s.net"
 }
 
-variable "turing_addr_v4" {
-  description = "Tailscale v4 100.x address for turing"
-  type        = string
-}
-
-variable "turing_addr_v6" {
-  description = "Tailscale v6 fd7a:115c:… address for turing"
-  type        = string
-}
-
-variable "juicy_j_addr_v4" {
-  description = "Tailscale v4 100.x address for juicy-j"
-  type        = string
-}
-
-variable "juicy_j_addr_v6" {
-  description = "Tailscale v6 fd7a:115c:… address for juicy-j"
-  type        = string
-}
-
 variable "dns_usw2_toplevel_path" {
   description = "Store path of the dns-usw2 system toplevel, signed and uploaded to s3://burk3-dns-cache by scripts/deploy-dns.sh"
   type        = string
