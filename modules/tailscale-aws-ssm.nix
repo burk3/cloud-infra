@@ -23,18 +23,6 @@ in
       description = "SSM parameter (SecureString) containing the tailnet auth key used on first ever boot.";
     };
 
-    statePathPrefix = lib.mkOption {
-      type = lib.types.str;
-      default = "/dns-nodes";
-      description = ''
-        SSM parameter prefix for the one-time state seed at
-        <prefix>/<hostname>/tailscaled-state. This is consumed once on
-        first boot of a fresh EBS volume (e.g., the migration from
-        SSM-state to EBS-state), then becomes a no-op forever because
-        the EBS-backed /var/lib/tailscale always has state.
-      '';
-    };
-
     tags = lib.mkOption {
       type = lib.types.listOf lib.types.str;
       default = [ ];
@@ -150,66 +138,9 @@ in
       '';
     };
 
-    # Seed /var/lib/tailscale from SSM if the (just-mounted) EBS volume is
-    # fresh. After the first successful boot the EBS volume always has
-    # state, so this exits early "already present" on every subsequent
-    # boot. The SSM-state mechanism is therefore a one-shot bootstrap
-    # for new volumes; we still need the parameter to exist for the
-    # initial EBS migration.
-    systemd.services.tailscale-state-restore = {
-      description = "Seed tailscaled.state from SSM on a fresh EBS volume";
-      wantedBy = [ "tailscaled.service" ];
-      before = [ "tailscaled.service" ];
-      after = [
-        "mount-tsdata.service"
-        "network-online.target"
-      ];
-      wants = [
-        "mount-tsdata.service"
-        "network-online.target"
-      ];
-      serviceConfig = {
-        Type = "oneshot";
-        RemainAfterExit = true;
-      };
-      environment.AWS_USE_DUALSTACK_ENDPOINT = "true";
-      path = [
-        pkgs.awscli2
-        pkgs.coreutils
-      ];
-      script = ''
-        set -uo pipefail
-        STATE_FILE=/var/lib/tailscale/tailscaled.state
-        if [ -s "$STATE_FILE" ]; then
-          echo "tailscaled state already on EBS; not restoring"
-          exit 0
-        fi
-        PARAM="${cfg.statePathPrefix}/${config.networking.hostName}/tailscaled-state"
-        # Use if-cond around the aws call so its non-zero exit (e.g. 254
-        # on ParameterNotFound) doesn't trip the implicit errexit that
-        # NixOS systemd `script =` wrappers apply.
-        if OUT=$(aws ssm get-parameter \
-                   --name "$PARAM" \
-                   --with-decryption \
-                   --query 'Parameter.Value' \
-                   --output text 2>&1); then
-          printf '%s' "$OUT" | base64 -d > "$STATE_FILE"
-          chmod 600 "$STATE_FILE"
-          chown root:root "$STATE_FILE"
-          echo "seeded tailscaled state from $PARAM ($(wc -c < "$STATE_FILE") bytes)"
-        elif echo "$OUT" | grep -q ParameterNotFound; then
-          echo "no SSM seed at $PARAM; tailscale-join will mint a fresh identity"
-        else
-          echo "ERROR fetching $PARAM: $OUT" >&2
-          exit 1
-        fi
-      '';
-    };
-
-    # Authenticate the daemon if it isn't already. On first ever boot (no
-    # SSM seed, no EBS state) this is the only thing that creates a
-    # tailnet identity. After EBS is populated, this is a steady-state
-    # no-op on every boot.
+    # Authenticate the daemon if it isn't already. On first ever boot
+    # (empty EBS volume) this mints a fresh identity via the SSM-stored
+    # auth key. After EBS is populated, this is a steady-state no-op.
     systemd.services.tailscale-join = {
       description = "Authenticate tailscaled to the tailnet (no-op if already Running)";
       wantedBy = [ "multi-user.target" ];
