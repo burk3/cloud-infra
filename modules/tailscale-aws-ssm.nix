@@ -185,24 +185,24 @@ in
           exit 0
         fi
         PARAM="${cfg.statePathPrefix}/${config.networking.hostName}/tailscaled-state"
-        OUT=$(aws ssm get-parameter \
-                --name "$PARAM" \
-                --with-decryption \
-                --query 'Parameter.Value' \
-                --output text 2>&1)
-        rc=$?
-        if [ "$rc" -ne 0 ]; then
-          if echo "$OUT" | grep -q ParameterNotFound; then
-            echo "no SSM seed at $PARAM; tailscale-join will mint a fresh identity"
-            exit 0
-          fi
+        # Use if-cond around the aws call so its non-zero exit (e.g. 254
+        # on ParameterNotFound) doesn't trip the implicit errexit that
+        # NixOS systemd `script =` wrappers apply.
+        if OUT=$(aws ssm get-parameter \
+                   --name "$PARAM" \
+                   --with-decryption \
+                   --query 'Parameter.Value' \
+                   --output text 2>&1); then
+          printf '%s' "$OUT" | base64 -d > "$STATE_FILE"
+          chmod 600 "$STATE_FILE"
+          chown root:root "$STATE_FILE"
+          echo "seeded tailscaled state from $PARAM ($(wc -c < "$STATE_FILE") bytes)"
+        elif echo "$OUT" | grep -q ParameterNotFound; then
+          echo "no SSM seed at $PARAM; tailscale-join will mint a fresh identity"
+        else
           echo "ERROR fetching $PARAM: $OUT" >&2
           exit 1
         fi
-        printf '%s' "$OUT" | base64 -d > "$STATE_FILE"
-        chmod 600 "$STATE_FILE"
-        chown root:root "$STATE_FILE"
-        echo "seeded tailscaled state from $PARAM ($(wc -c < "$STATE_FILE") bytes)"
       '';
     };
 
