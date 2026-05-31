@@ -1,44 +1,52 @@
 {
-  description = "A minimal flake template that you can adapt to your own project";
+  description = "AWS DNS-node infrastructure for ts.t11s.net";
 
   inputs.nixpkgs.url = "https://flakehub.com/f/NixOS/nixpkgs/0";
 
   outputs =
-    { self, ... }@inputs:
+    { self, nixpkgs }:
     let
-      inherit (inputs.nixpkgs) lib;
+      mkDnsNode =
+        hostName:
+        nixpkgs.lib.nixosSystem {
+          system = "aarch64-linux";
+          modules = [
+            "${nixpkgs}/nixos/modules/virtualisation/amazon-image.nix"
+            ./modules/dns-node.nix
+            {
+              networking.hostName = hostName;
+              system.stateVersion = "25.11";
+            }
+          ];
+        };
 
-      supportedSystems = [
-        "x86_64-linux"
-        "aarch64-linux"
-        "aarch64-darwin"
-      ];
-
-      forEachSupportedSystem =
-        f:
-        lib.genAttrs supportedSystems (
-          system:
-          f {
+      forSystem =
+        system: f:
+        f {
+          inherit system;
+          pkgs = import nixpkgs {
             inherit system;
-            pkgs = import inputs.nixpkgs {
-              inherit system;
-              config.allowUnfree = true;
-            };
-          }
-        );
+            config.allowUnfree = true;
+          };
+        };
     in
     {
-      devShells = forEachSupportedSystem (
-        { pkgs, system }:
-        {
-          default = pkgs.mkShellNoCC {
-            packages = with pkgs; [
-              self.formatter.${system}
-            ];
-          };
+      nixosConfigurations = {
+        dns-usw2 = mkDnsNode "dns-usw2";
+        dns-use2 = mkDnsNode "dns-use2";
+      };
+
+      devShells.x86_64-linux.default = forSystem "x86_64-linux" (
+        { pkgs, ... }:
+        pkgs.mkShellNoCC {
+          packages = with pkgs; [
+            terraform
+            awscli2
+            jq
+          ];
         }
       );
 
-      formatter = forEachSupportedSystem ({ pkgs, ... }: pkgs.nixfmt);
+      formatter.x86_64-linux = forSystem "x86_64-linux" ({ pkgs, ... }: pkgs.nixfmt-rfc-style);
     };
 }
