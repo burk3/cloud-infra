@@ -27,7 +27,7 @@ A brand-new host (new region/AZ, fresh hostname) gets its identity from `tailsca
 
 ## Deploy model
 
-Operator-driven via `scripts/deploy-dns.sh`. Closures get signed locally and pushed to `s3://burk3-dns-cache`; instances substitute via their IAM role's `s3:GetObject` and verify against `burk3-dns-cache:ZAWST40z…`. Terraform state is local (`terraform/terraform.tfstate`, gitignored).
+Operator-driven via `scripts/deploy-dns.sh`. Closures get signed locally and pushed to `s3://burk3-dns-cache`; instances substitute via their IAM role's `s3:GetObject` and verify against `burk3-dns-cache:ZAWST40z…`. Terraform state lives in `s3://burk3-cloud-infra-tfstate/cloud-infra.tfstate` with native S3 locking (`use_lockfile = true`); the bucket is bootstrapped out-of-band (see `docs/manual-setup.md`).
 
 Terraform owns: VPCs (us-west-2 + us-east-2, dual-stack for IMDS), Route 53 private hosted zone + records, IAM role/profile + SSM auth-key parameter, S3 cache bucket, per-host EBS volume + attachment, EC2 instances with user-data that pulls + activates.
 

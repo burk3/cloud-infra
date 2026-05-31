@@ -21,6 +21,27 @@ The operator's workstation needs nixbuild.net configured as a remote builder for
 
 This is operator-side only; the deployed instances don't talk to nixbuild.net.
 
+### 3. Terraform state bucket
+
+The S3 backend bucket (`burk3-cloud-infra-tfstate` in us-west-2) holds Terraform state and its native lockfile. Can't be managed inside the state file it stores, so it's one-time bootstrap via awscli:
+
+```sh
+BUCKET=burk3-cloud-infra-tfstate
+REGION=us-west-2
+aws s3api create-bucket --bucket "$BUCKET" --region "$REGION" \
+  --create-bucket-configuration LocationConstraint="$REGION"
+aws s3api put-bucket-versioning --bucket "$BUCKET" \
+  --versioning-configuration Status=Enabled
+aws s3api put-public-access-block --bucket "$BUCKET" \
+  --public-access-block-configuration \
+    BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true
+aws s3api put-bucket-encryption --bucket "$BUCKET" \
+  --server-side-encryption-configuration \
+    '{"Rules":[{"ApplyServerSideEncryptionByDefault":{"SSEAlgorithm":"AES256"}}]}'
+```
+
+After the bucket exists, `terraform init` in `terraform/` connects to it automatically — no further setup needed.
+
 ### 4. Tailscale ACL: declare `tag:dns-node`
 
 The Terraform-managed Tailscale auth key uses `tag:dns-node`, which must exist in the tailnet ACL before the API will let any client (including Terraform) issue keys tagged with it.

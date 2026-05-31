@@ -1,5 +1,13 @@
 terraform {
-  required_version = ">= 1.7"
+  required_version = ">= 1.10"
+
+  backend "s3" {
+    bucket       = "burk3-cloud-infra-tfstate"
+    key          = "cloud-infra.tfstate"
+    region       = "us-west-2"
+    encrypt      = true
+    use_lockfile = true
+  }
 
   required_providers {
     aws = {
